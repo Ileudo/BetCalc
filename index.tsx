@@ -33,11 +33,12 @@ interface CalculationResult {
 // --- ERROR BOUNDARY ---
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  // FIX: The constructor-based state initialization was causing typing issues where
-  // component instance properties like `this.state` and `this.props` were not
-  // being recognized. Using a class property is a more direct and modern way
-  // to initialize state, which resolves these errors.
-  state = { hasError: false };
+  // FIX: Replaced class property state initialization with a standard constructor
+  // to resolve typing errors where `this.setState` and `this.props` were not recognized.
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(_: Error) {
     return { hasError: true };
@@ -489,7 +490,7 @@ function App() {
   const results = useMemo(() => calculateOdds(inputs), [inputs]);
 
   return (
-    <div className="h-screen w-full bg-[#0f172a] text-slate-200 font-sans selection:bg-emerald-500/30 overflow-hidden flex flex-col pt-8 px-8 pb-32">
+    <div className="min-h-screen w-full bg-[#0f172a] text-slate-200 font-sans selection:bg-emerald-500/30 overflow-y-auto flex flex-col pt-8 px-8 pb-32">
       <div className="flex-1 max-w-[1920px] mx-auto w-full grid grid-cols-12 gap-8">
         
         {/* LEFT COLUMN: Input & Verification */}
