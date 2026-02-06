@@ -1,5 +1,3 @@
-
-
 import React, { useState, useMemo, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ShieldCheck, Zap, Activity, ClipboardCheck, X, Target, Crosshair, AlertTriangle, RefreshCw } from 'lucide-react';
@@ -32,14 +30,18 @@ interface CalculationResult {
 
 // --- ERROR BOUNDARY ---
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  // FIX: Replaced the constructor with a class property for state initialization.
-  // The constructor-based approach was causing typing errors where `this.state`,
-  // `this.props`, and `this.setState` were not being recognized. This is a more
-  // modern and robust way to initialize state in a class component.
-  state = { hasError: false };
+interface ErrorBoundaryProps {
+  children?: ReactNode;
+}
 
-  static getDerivedStateFromError(_: Error) {
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(_: Error): ErrorBoundaryState {
     return { hasError: true };
   }
 
@@ -70,7 +72,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 // --- MATH UTILITIES ---
 
 const factorial = (n: number): number => {
-  if (n === 0) return 1;
+  if (n <= 1) return 1;
   let res = 1;
   for (let i = 2; i <= n; i++) res *= i;
   return res;
@@ -91,33 +93,24 @@ const getDixonColesAdj = (h: number, a: number, l1: number, l2: number, rho: num
 
 const removeMarginPower = (odds: number[]): number[] => {
   try {
-    const invOdds = odds.map(o => (o > 0 ? 1 / o : 0));
-    if (invOdds.some(v => v === 0)) return odds.map(() => 0); // Safety check
+    const invOdds = odds.map(o => (o > 1 ? 1 / o : 0));
+    // Check if odds are valid
+    if (invOdds.includes(0)) return odds.map(() => 0);
 
     let k = 1.0;
-    let step = 0.1;
+    let minK = 0.01, maxK = 20.0;
     
-    // Iterative solver for k
+    // Binary search for power k that sums probabilities to 1
     for (let i = 0; i < 50; i++) {
-      const sum = invOdds.reduce((acc, p) => acc + Math.pow(p, k), 0);
-      if (Math.abs(sum - 1) < 0.0000001) break;
-      if (sum > 1) k += step; else k -= step;
-      if (sum > 1 && step > 0.0000001) step *= 0.5; 
-    }
-    
-    // Refine
-    let minK = 0.05, maxK = 15.0;
-    for (let i = 0; i < 30; i++) {
       const midK = (minK + maxK) / 2;
       const sum = invOdds.reduce((acc, p) => acc + Math.pow(p, midK), 0);
+      if (Math.abs(sum - 1) < 1e-9) { k = midK; break; }
       if (sum > 1) minK = midK; else maxK = midK;
       k = midK;
     }
-
     return invOdds.map(p => Math.pow(p, k));
   } catch (e) {
-    console.warn("Margin removal failed", e);
-    return odds.map(o => 1/o); // Fallback to raw probabilities
+    return odds.map(o => 1/o);
   }
 };
 
@@ -134,181 +127,161 @@ const calculateOdds = (inputs: InputState): CalculationResult | null => {
 
     if (w1 <= 1 || x <= 1 || w2 <= 1 || over <= 1 || under <= 1) return null;
 
+    // Remove margin from inputs to get "Fair" probabilities
     const [fP1, fPX, fP2] = removeMarginPower([w1, x, w2]);
     const [fPOver, fPUnder] = removeMarginPower([over, under]);
 
-    const m1X2 = 1/w1 + 1/x + 1/w2;
+    // Calculate actual input margins
+    const rawMargin1X2 = (1/w1 + 1/x + 1/w2) - 1;
+    const rawMarginTotal = (1/over + 1/under) - 1;
 
-    const initL = Math.max(0.4, totalV / 2);
-    let bestL1 = initL, bestL2 = initL, bestRho = 0;
+    // --- CALIBRATION LOGIC ---
+
+    // Function to calculate "Effective Under Probability" for Quarter lines
+    const getEffectiveUnderProb = (l1: number, l2: number, rho: number, v: number) => {
+      let probAccum = 0;
+      
+      const floorV = Math.floor(v);
+      const remainder = v - floorV; // 0.25, 0.5, 0.75, 0.0
+
+      for (let i = 0; i <= 15; i++) {
+        const pi = poisson(i, l1);
+        if (pi < 1e-6) continue;
+        for (let j = 0; j <= 15; j++) {
+          const pj = poisson(j, l2);
+          if (pj < 1e-6) continue;
+          
+          const pScore = pi * pj * getDixonColesAdj(i, j, l1, l2, rho);
+          const goals = i + j;
+
+          if (remainder === 0.25) {
+             // Total X.25 = 0.5 * Under X.0 + 0.5 * Under X.5
+             if (goals < floorV) probAccum += pScore * 1.0;
+             else if (goals === floorV) probAccum += pScore * 0.5;
+          } else if (remainder === 0.75) {
+             // Total X.75 = 0.5 * Under X.5 + 0.5 * Under (X+1).0
+             const pU_Lower = (goals <= floorV) ? 1 : 0; 
+             const pU_Upper = (goals <= floorV + 1) ? 1 : 0;
+             probAccum += pScore * 0.5 * (pU_Lower + pU_Upper);
+          } else if (remainder === 0.5) {
+             if (goals < v) probAccum += pScore;
+          } else {
+             if (goals < v) probAccum += pScore;
+          }
+        }
+      }
+      return probAccum;
+    };
+
+    let bestL1 = 1.35, bestL2 = 1.15, bestRho = 0;
     let minError = Infinity;
 
-    const isDrawHeavy = x < 2.95;
-    const w_P1 = 20.0;
-    const w_P2 = 20.0;
-    const w_PX = isDrawHeavy ? 35.0 : 12.0; 
-    const w_Tot = 10.0;
+    // WEIGHTS
+    // 1X2 provides the base distribution shape.
+    // Total line (especially if low like 1.75) is a very strong constraint.
+    const w_P1 = 80.0;
+    const w_P2 = 80.0;
+    const w_PX = 100.0; 
+    const w_Tot = 25.0; // Increased weight for Total to respect lines like 1.75 more strictly
 
-    const getModelUnderProb = (l1: number, l2: number, rho: number, v: number) => {
-      let pUnder = 0;
-      let pPush = 0;
-      const isInteger = v % 1 === 0;
-      const isHalf = v % 1 === 0.5;
-      const isQuarter = !isInteger && !isHalf;
-
-      for (let i = 0; i <= 14; i++) {
-        const pi = poisson(i, l1);
-        for (let j = 0; j <= 14; j++) {
-          const prob = pi * poisson(j, l2) * getDixonColesAdj(i, j, l1, l2, rho);
-          const score = i + j;
-
-          if (isInteger) {
-            if (score < v) pUnder += prob;
-            else if (score === v) pPush += prob;
-          } else if (isQuarter) {
-             const floor = Math.floor(v);
-             if (Math.abs(v % 1 - 0.25) < 0.01) { // -0.25 type logic
-                if (score < floor) pUnder += prob;
-                else if (score === floor) pUnder += prob * 0.5;
-             } else if (Math.abs(v % 1 - 0.75) < 0.01) { // -0.75 type logic
-                if (score <= Math.floor(v)) pUnder += prob;
-                else if (score === Math.ceil(v)) pUnder += prob * 0.5;
-             }
-          } else {
-             if (score < v) pUnder += prob;
-          }
-        }
-      }
-
-      if (isInteger) {
-        return pPush >= 0.99 ? 0 : pUnder / (1 - pPush);
-      }
-      return pUnder;
-    };
-
-    const calcError = (l1: number, l2: number, rho: number) => {
-      let p1 = 0, pX = 0, p2 = 0;
-      for (let i = 0; i <= 14; i++) {
-        const pi = poisson(i, l1);
-        for (let j = 0; j <= 14; j++) {
-          const prob = pi * poisson(j, l2) * getDixonColesAdj(i, j, l1, l2, rho);
-          if (i > j) p1 += prob; else if (i === j) pX += prob; else p2 += prob;
-        }
-      }
-      const pModelUnder = getModelUnderProb(l1, l2, rho, totalV);
-      return (
-        Math.pow(p1 - fP1, 2) * w_P1 + 
-        Math.pow(pX - fPX, 2) * w_PX + 
-        Math.pow(p2 - fP2, 2) * w_P2 + 
-        Math.pow(pModelUnder - fPUnder, 2) * w_Tot
-      );
-    };
-
+    // Optimization Loop
     let step = 0.4;
-    for (let pass = 0; pass < 9; pass++) {
-      const l1Range = [bestL1 - step * 3, bestL1 + step * 3];
-      const l2Range = [bestL2 - step * 3, bestL2 + step * 3];
-      
-      const startL1 = Math.max(0.01, l1Range[0]);
-      const startL2 = Math.max(0.01, l2Range[0]);
-
-      // Safety break for loop limits
-      const endL1 = Math.min(l1Range[1], 10);
-      const endL2 = Math.min(l2Range[1], 10);
-
-      for (let l1 = startL1; l1 <= endL1; l1 += step) {
-        for (let l2 = startL2; l2 <= endL2; l2 += step) {
-          const rSteps = pass < 4 
-            ? [bestRho - 0.15, bestRho - 0.05, bestRho, bestRho + 0.05, bestRho + 0.15] 
-            : [bestRho];
-
+    for (let pass = 0; pass < 6; pass++) {
+      for (let l1 = Math.max(0.05, bestL1 - step*2); l1 <= bestL1 + step*2; l1 += step) {
+        for (let l2 = Math.max(0.05, bestL2 - step*2); l2 <= bestL2 + step*2; l2 += step) {
+          // Expanded rho search for low totals where draw dependance is critical
+          const rSteps = pass < 3 ? [-0.25, -0.15, -0.05, 0, 0.05, 0.15, 0.25] : [bestRho];
           for (let r of rSteps) {
-            const clippedR = Math.max(-0.45, Math.min(0.45, r));
-            const err = calcError(l1, l2, clippedR);
-            if (err < minError) { 
-              minError = err; bestL1 = l1; bestL2 = l2; bestRho = clippedR; 
-            }
+             let p1 = 0, pX = 0, p2 = 0;
+             // Inner loop for probabilities
+             for (let i = 0; i <= 12; i++) {
+                const pi = poisson(i, l1);
+                for (let j = 0; j <= 12; j++) {
+                   const prob = pi * poisson(j, l2) * getDixonColesAdj(i, j, l1, l2, r);
+                   if (i > j) p1 += prob;
+                   else if (i === j) pX += prob;
+                   else p2 += prob;
+                }
+             }
+             
+             const pUnder = getEffectiveUnderProb(l1, l2, r, totalV);
+             
+             const err = 
+                Math.pow(p1 - fP1, 2) * w_P1 + 
+                Math.pow(pX - fPX, 2) * w_PX + 
+                Math.pow(p2 - fP2, 2) * w_P2 + 
+                Math.pow(pUnder - fPUnder, 2) * w_Tot;
+
+             if (err < minError) {
+                minError = err; bestL1 = l1; bestL2 = l2; bestRho = r;
+             }
           }
         }
       }
-      step /= 2.2;
+      step *= 0.6;
     }
 
-    // Final Refinement for Rho
-    for (let r = -0.45; r <= 0.45; r += 0.002) { // increased step slightly for perf
-      const err = calcError(bestL1, bestL2, r);
-      if (err < minError) { minError = err; bestRho = r; }
-    }
-
+    // --- FINAL CALCULATION ---
     let finalP1 = 0, finalPX = 0, finalP2 = 0;
     for (let i = 0; i <= 20; i++) {
-      const pi = poisson(i, bestL1);
-      for (let j = 0; j <= 20; j++) {
-        const prob = pi * poisson(j, bestL2) * getDixonColesAdj(i, j, bestL1, bestL2, bestRho);
-        if (i > j) finalP1 += prob; else if (i === j) finalPX += prob; else finalP2 += prob;
-      }
+       const pi = poisson(i, bestL1);
+       for (let j = 0; j <= 20; j++) {
+          const prob = pi * poisson(j, bestL2) * getDixonColesAdj(i, j, bestL1, bestL2, bestRho);
+          if (i > j) finalP1 += prob;
+          else if (i === j) finalPX += prob;
+          else finalP2 += prob;
+       }
     }
 
-    const totalMargin = m1X2 - 1;
-    // Cap margin adjustment to realistic bounds to prevent divide by zero
-    const ahMargin = Math.max(1.01, Math.min(1.10, 1 + totalMargin * 0.82));
-
-    const safeDiv = (val: number, margin: number) => (val > 0.0001 ? (val / margin).toFixed(3) : "---");
-    const safeRaw = (val: number) => (val > 0.0001 ? val.toFixed(3) : "---");
-
-    // DNB
-    const fairDNB1 = finalP1 / (finalP1 + finalP2); // Normalized
-    const fairDNB2 = finalP2 / (finalP1 + finalP2); // Normalized
-
-    // -0.25 (T1 -0.25, T2 +0.25)
-    // T1 Wins: Full Win. Draw: Half Loss. T2 Win: Loss.
-    // T1 -0.25 equivalent Prob: P(T1) + 0.5 * P(X) ??? No, 
-    // Handi -0.25: Win if Team wins. Half Lose if Draw.
-    // Equity = P(Win) * 1 + P(Draw) * 0.5.
-    // Odds = 1 / Equity.
-    const eq_T1_m025 = finalP1 + 0.5 * finalPX; // Probability of winning (half win on draw? No, -0.25 loses half on draw).
+    const fair_H1_m025 = (1 - 0.5 * finalPX) / finalP1;
+    const fair_H2_p025 = (1 - 0.5 * finalPX) / (finalP2 + 0.5 * finalPX);
     
-    // Correct logic for Asian Handicap -0.25 / +0.25 conversion to Odds
-    // T1 (-0.25): Win=Win. Draw=Half Loss.
-    // To calculate fair odds: 
-    // We need the probability that makes the bet a "winner".
-    // Actually, simple conversion: 
-    const fair_T1_m025_dec = (1 - 0.5 * finalPX) / finalP1; // From original code
-    const fair_T2_p025_dec = (1 - 0.5 * finalPX) / (finalP2 + 0.5 * finalPX); // From original code
+    const fair_H1_p025 = (1 - 0.5 * finalPX) / (finalP1 + 0.5 * finalPX);
+    const fair_H2_m025 = (1 - 0.5 * finalPX) / finalP2;
 
-    const fair_T1_p025_dec = (1 - 0.5 * finalPX) / (finalP1 + 0.5 * finalPX);
-    const fair_T2_m025_dec = (1 - 0.5 * finalPX) / finalP2;
+    const fair_H1_0 = (finalP1 + finalP2) / finalP1;
+    const fair_H2_0 = (finalP1 + finalP2) / finalP2;
 
-    const fairDNB1_dec = 1/fairDNB1;
-    const fairDNB2_dec = 1/fairDNB2;
+    // --- ADAPTIVE MARGIN LOGIC ---
+    // User data shows high margin (14% on 1X2, 9.4% on Total).
+    // Previous logic capped margin at 4.5%, making odds look too "good" (high).
+    // New Logic: Use Total Margin as a baseline for AH Margin, as they are often correlated in VIG.
+    // If Total Margin is missing or very low, fallback to scaled 1X2 margin.
+    
+    let targetAhMargin = 0;
+    if (rawMarginTotal > 0.02) {
+       // If total margin is explicit and substantial, trust it for AH
+       targetAhMargin = rawMarginTotal; 
+    } else {
+       // Fallback: Asian margin is usually ~60-70% of 1X2 margin in standard books
+       targetAhMargin = rawMargin1X2 * 0.7;
+    }
+    
+    // Allow margin to float, but prevent extreme runaway (>12%)
+    const ahMargin = 1 + Math.min(targetAhMargin, 0.12);
+
+    const safeRaw = (v: number) => v > 0 ? v.toFixed(3) : "---";
+    const safeMkt = (v: number) => v > 0 ? (v / ahMargin).toFixed(3) : "---";
 
     return {
-      margin: (totalMargin * 100).toFixed(2),
-      fitError: (minError * 100).toFixed(6),
-      
+      margin: (rawMargin1X2 * 100).toFixed(2),
+      fitError: minError.toFixed(6),
       h0: {
-        h1_fair: safeRaw(fairDNB1_dec),
-        h2_fair: safeRaw(fairDNB2_dec),
-        h1_market: safeDiv(fairDNB1_dec, ahMargin),
-        h2_market: safeDiv(fairDNB2_dec, ahMargin)
+        h1_fair: safeRaw(fair_H1_0), h2_fair: safeRaw(fair_H2_0),
+        h1_market: safeMkt(fair_H1_0), h2_market: safeMkt(fair_H2_0)
       },
-      
       hm025: {
-        h1_fair: safeRaw(fair_T1_m025_dec),
-        h2_fair: safeRaw(fair_T2_p025_dec),
-        h1_market: safeDiv(fair_T1_m025_dec, ahMargin),
-        h2_market: safeDiv(fair_T2_p025_dec, ahMargin)
+        h1_fair: safeRaw(fair_H1_m025), h2_fair: safeRaw(fair_H2_p025),
+        h1_market: safeMkt(fair_H1_m025), h2_market: safeMkt(fair_H2_p025)
       },
-
       hp025: {
-        h1_fair: safeRaw(fair_T1_p025_dec),
-        h2_fair: safeRaw(fair_T2_m025_dec),
-        h1_market: safeDiv(fair_T1_p025_dec, ahMargin),
-        h2_market: safeDiv(fair_T2_m025_dec, ahMargin)
+        h1_fair: safeRaw(fair_H1_p025), h2_fair: safeRaw(fair_H2_m025),
+        h1_market: safeMkt(fair_H1_p025), h2_market: safeMkt(fair_H2_m025)
       }
     };
+
   } catch (err) {
-    console.error("Calculation Error", err);
+    console.error(err);
     return null;
   }
 };
@@ -319,7 +292,7 @@ const InputCard = ({
   label, 
   inputs, 
   onChange, 
-  keys,
+  keys, 
   colors 
 }: { 
   label: string, 
@@ -399,12 +372,12 @@ const MetricTooltip = ({ title, value, info }: { title: string, value: ReactNode
 
 function App() {
   const [inputs, setInputs] = useState<InputState>({
-    w1: '2.13',
-    x: '3.22',
-    w2: '3.29',
-    totalValue: '2.00',
-    over: '1.787',
-    under: '2.01',
+    w1: '1.943',
+    x: '3.14',
+    w2: '3.51',
+    totalValue: '2.25',
+    over: '1.775',
+    under: '1.943',
   });
 
   const [rawText, setRawText] = useState('');
