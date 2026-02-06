@@ -33,12 +33,11 @@ interface CalculationResult {
 // --- ERROR BOUNDARY ---
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  // FIX: Replaced class property state initialization with a standard constructor
-  // to resolve typing errors where `this.setState` and `this.props` were not recognized.
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  // FIX: Replaced the constructor with a class property for state initialization.
+  // The constructor-based approach was causing typing errors where `this.state`,
+  // `this.props`, and `this.setState` were not being recognized. This is a more
+  // modern and robust way to initialize state in a class component.
+  state = { hasError: false };
 
   static getDerivedStateFromError(_: Error) {
     return { hasError: true };
@@ -490,7 +489,7 @@ function App() {
   const results = useMemo(() => calculateOdds(inputs), [inputs]);
 
   return (
-    <div className="min-h-screen w-full bg-[#0f172a] text-slate-200 font-sans selection:bg-emerald-500/30 overflow-y-auto flex flex-col pt-8 px-8 pb-32">
+    <div className="h-screen w-full bg-[#0f172a] text-slate-200 font-sans selection:bg-emerald-500/30 overflow-hidden flex flex-col pt-8 px-8 pb-32">
       <div className="flex-1 max-w-[1920px] mx-auto w-full grid grid-cols-12 gap-8">
         
         {/* LEFT COLUMN: Input & Verification */}
@@ -514,7 +513,7 @@ function App() {
                   parseInputText(e.target.value);
                 }}
                 placeholder='Paste Pinnacle Data Here...'
-                className={`w-full bg-[#1e293b] border-2 rounded-2xl p-6 text-xs font-mono transition-all duration-300 outline-none resize-none h-64 overflow-y-auto shadow-lg ${
+                className={`w-full bg-[#1e293b] border-2 rounded-2xl p-6 text-xs font-mono transition-all duration-300 outline-none resize-none h-48 overflow-y-auto shadow-lg ${
                   isImportSuccess ? 'border-emerald-500 ring-4 ring-emerald-500/10' : 'border-slate-800 focus:border-emerald-500/50'
                 }`}
               />
@@ -594,7 +593,7 @@ function App() {
              {/* MAIN ACTION AREA: Priority Handicaps */}
              <div className="flex-1 grid grid-cols-2 gap-6 overflow-hidden">
                 {/* Handicap 2 (0) */}
-                <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] rounded-[2.5rem] border border-slate-700 p-8 relative overflow-hidden group hover:border-blue-500/50 transition-colors flex flex-col">
+                <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] rounded-3xl border border-slate-700 p-6 relative overflow-hidden group hover:border-blue-500/50 transition-colors flex flex-col">
                     <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
                       <ShieldCheck className="w-32 h-32 text-blue-500" />
                     </div>
@@ -603,14 +602,14 @@ function App() {
                           <div className="inline-flex items-center gap-2 bg-blue-500/10 text-blue-400 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-4">
                              Target 1
                           </div>
-                          <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Team 2 (0)</h2>
+                          <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Team 2 (0)</h2>
                           <p className="text-slate-500 text-xs font-medium mt-1">Draw No Bet • Away</p>
                        </div>
 
                        <div className="space-y-2 mt-auto">
                           <div className="flex items-baseline justify-between">
                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Market Est.</span>
-                             <span className="text-7xl font-mono font-black text-blue-400 tracking-tighter">
+                             <span className="text-6xl font-mono font-black text-blue-400 tracking-tighter">
                                {results ? results.h0.h2_market : '---'}
                              </span>
                           </div>
@@ -625,7 +624,7 @@ function App() {
                 </div>
 
                 {/* Handicap 2 (-0.25) */}
-                <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] rounded-[2.5rem] border border-slate-700 p-8 relative overflow-hidden group hover:border-emerald-500/50 transition-colors flex flex-col">
+                <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] rounded-3xl border border-slate-700 p-6 relative overflow-hidden group hover:border-emerald-500/50 transition-colors flex flex-col">
                     <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
                       <Crosshair className="w-32 h-32 text-emerald-500" />
                     </div>
@@ -634,14 +633,14 @@ function App() {
                           <div className="inline-flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-4">
                              Target 2
                           </div>
-                          <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Team 2 (-0.25)</h2>
+                          <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Team 2 (-0.25)</h2>
                           <p className="text-slate-500 text-xs font-medium mt-1">Asian Handicap • Away</p>
                        </div>
 
                        <div className="space-y-2 mt-auto">
                           <div className="flex items-baseline justify-between">
                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Market Est.</span>
-                             <span className="text-7xl font-mono font-black text-emerald-400 tracking-tighter">
+                             <span className="text-6xl font-mono font-black text-emerald-400 tracking-tighter">
                                {results ? results.hp025.h2_market : '---'}
                              </span>
                           </div>
