@@ -1,5 +1,4 @@
 
-
 import React, { useState, useMemo, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ShieldCheck, Zap, Activity, ClipboardCheck, X, Target, Crosshair, AlertTriangle, RefreshCw } from 'lucide-react';
@@ -33,11 +32,8 @@ interface CalculationResult {
 // --- ERROR BOUNDARY ---
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  // FIX: Replaced the state class property with a constructor to ensure `this.props` and `this.setState` are correctly inherited from React.Component, resolving type errors.
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  // FIX: Replaced the constructor with a state class property. This is a more modern and concise syntax for initializing state in React class components and resolves the reported errors related to `this.state` and `this.props` not being found.
+  state = { hasError: false };
 
   static getDerivedStateFromError(_: Error) {
     return { hasError: true };
@@ -489,7 +485,7 @@ function App() {
   const results = useMemo(() => calculateOdds(inputs), [inputs]);
 
   return (
-    <div className="h-screen w-full bg-[#0f172a] text-slate-200 font-sans selection:bg-emerald-500/30 overflow-hidden flex flex-col p-8">
+    <div className="h-screen w-full bg-[#0f172a] text-slate-200 font-sans selection:bg-emerald-500/30 overflow-hidden flex flex-col pt-8 px-8 pb-16">
       <div className="flex-1 max-w-[1920px] mx-auto w-full grid grid-cols-12 gap-8">
         
         {/* LEFT COLUMN: Input & Verification */}
@@ -641,13 +637,13 @@ function App() {
                           <div className="flex items-baseline justify-between">
                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Market Est.</span>
                              <span className="text-7xl font-mono font-black text-emerald-400 tracking-tighter">
-                               {results ? results.hp025.h2_market : '---'}
+                               {results ? results.hm025.h2_market : '---'}
                              </span>
                           </div>
                           <div className="flex items-baseline justify-between border-t border-slate-800 pt-2">
                              <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Fair Value</span>
                              <span className="text-2xl font-mono font-bold text-slate-400">
-                               {results ? results.hp025.h2_fair : '---'}
+                               {results ? results.hm025.h2_fair : '---'}
                              </span>
                           </div>
                        </div>
